@@ -1,213 +1,26 @@
-import csv
-import os
-import random
 import sys
-from copy import deepcopy
-from statistics import mean, stdev
 
-os.environ.setdefault("MPLCONFIGDIR", "/tmp/matplotlib")
-
-import matplotlib.pyplot as plt
-import numpy as np
 import pygame
 
 from config import COLORS, CONFIG
-from simulation import Simulation
+from task2_experiment import (
+    TASK2_BASELINE,
+    TASK2_DEFAULT_SEEDS,
+    compute_metrics,
+    create_seeded_simulation,
+    current_counts,
+    d_values,
+    export_task2_outputs,
+    generate_fixed_seeds,
+    run_setting_fast,
+    summarize_task2,
+)
+from ui import Button, draw_grid, draw_text
 
 
 PANEL_WIDTH = 420
-TASK2_MASTER_SEED = 20260712
-TASK2_DEFAULT_SEEDS = [101, 203, 307, 409, 503]
-TASK2_BASELINE = {
-    "p": 0.3,
-    "N": 5,
-    "max_steps": 300,
-}
 SLOW_FPS = 1
 FAST_FPS = 10
-
-
-class Button:
-    def __init__(self, rect, label, action, enabled=True):
-        self.rect = pygame.Rect(rect)
-        self.label = label
-        self.action = action
-        self.enabled = enabled
-
-    def draw(self, screen, font):
-        fill = (64, 72, 84) if self.enabled else (42, 46, 54)
-        border = (120, 130, 145) if self.enabled else (72, 78, 88)
-        text_color = (235, 238, 242) if self.enabled else (135, 140, 148)
-        pygame.draw.rect(screen, fill, self.rect, border_radius=4)
-        pygame.draw.rect(screen, border, self.rect, width=1, border_radius=4)
-        label = font.render(self.label, True, text_color)
-        screen.blit(label, label.get_rect(center=self.rect.center))
-
-    def handle_click(self, pos):
-        if self.enabled and self.rect.collidepoint(pos):
-            self.action()
-            return True
-        return False
-
-
-def generate_fixed_seeds():
-    rng = random.Random(TASK2_MASTER_SEED)
-    return rng.sample(range(1, 10000), 5)
-
-
-def d_values(start, end, step):
-    values = []
-    value = start
-    while value <= end + 1e-9:
-        values.append(round(value, 1))
-        value += step
-    return values
-
-
-def build_task2_config(d_value):
-    config = deepcopy(CONFIG)
-    config["p"] = TASK2_BASELINE["p"]
-    config["N"] = TASK2_BASELINE["N"]
-    config["d"] = round(d_value, 1)
-    config["s"] = round(1.0 - d_value, 1)
-    return config
-
-
-def create_seeded_simulation(d_value, seed):
-    random.seed(seed)
-    np.random.seed(seed)
-    return Simulation(build_task2_config(d_value))
-
-
-def current_counts(sim):
-    if sim.history["H"]:
-        return {
-            "H": sim.history["H"][-1],
-            "I": sim.history["I"][-1],
-            "S": sim.history["S"][-1],
-            "R": sim.history["R"][-1],
-            "Dead": sim.history["Dead"][-1],
-        }
-
-    return {
-        "H": sum(1 for item in sim.agents_list if item["agent"].state == "H"),
-        "I": sum(1 for item in sim.agents_list if item["agent"].state == "I"),
-        "S": sum(1 for item in sim.agents_list if item["agent"].state == "S"),
-        "R": sum(1 for item in sim.agents_list if item["agent"].state == "R"),
-        "Dead": CONFIG["initial_population"] - len(sim.agents_list),
-    }
-
-
-def compute_metrics(sim, d_value, seed, duration):
-    infected_plus_sick = [
-        infected + sick for infected, sick in zip(sim.history["I"], sim.history["S"])
-    ]
-    counts = current_counts(sim)
-
-    return {
-        "d": round(d_value, 1),
-        "s": round(1.0 - d_value, 1),
-        "seed": seed,
-        "epidemic_duration": duration,
-        "total_deaths": counts["Dead"],
-        "final_recovered": counts["R"],
-        "peak_sick": max(sim.history["S"]) if sim.history["S"] else counts["S"],
-        "peak_infected_plus_sick": (
-            max(infected_plus_sick) if infected_plus_sick else counts["I"] + counts["S"]
-        ),
-    }
-
-
-def run_setting_fast(d_value, seed):
-    sim = create_seeded_simulation(d_value, seed)
-    duration = TASK2_BASELINE["max_steps"]
-
-    for step in range(1, TASK2_BASELINE["max_steps"] + 1):
-        sim.update_step()
-        if sim.active_cases() == 0:
-            duration = step
-            break
-
-    return compute_metrics(sim, d_value, seed, duration)
-
-
-def summarize_task2(raw_results):
-    summary = []
-    grouped = {}
-    for row in raw_results:
-        grouped.setdefault(row["d"], []).append(row)
-
-    for d_value in sorted(grouped):
-        rows = grouped[d_value]
-        durations = [row["epidemic_duration"] for row in rows]
-        deaths = [row["total_deaths"] for row in rows]
-        peak_sick = [row["peak_sick"] for row in rows]
-        summary.append(
-            {
-                "d": d_value,
-                "s": round(1.0 - d_value, 1),
-                "duration_mean": mean(durations),
-                "duration_std": stdev(durations) if len(durations) > 1 else 0.0,
-                "deaths_mean": mean(deaths),
-                "deaths_std": stdev(deaths) if len(deaths) > 1 else 0.0,
-                "peak_sick_mean": mean(peak_sick),
-                "peak_sick_std": stdev(peak_sick) if len(peak_sick) > 1 else 0.0,
-            }
-        )
-    return summary
-
-
-def export_task2_outputs(raw_results, summary):
-    os.makedirs("results", exist_ok=True)
-    os.makedirs("plots", exist_ok=True)
-
-    raw_path = "results/task2_raw_runs.csv"
-    summary_path = "results/task2_summary.csv"
-
-    with open(raw_path, "w", newline="", encoding="utf-8") as file:
-        writer = csv.DictWriter(file, fieldnames=list(raw_results[0].keys()))
-        writer.writeheader()
-        writer.writerows(raw_results)
-
-    with open(summary_path, "w", newline="", encoding="utf-8") as file:
-        writer = csv.DictWriter(file, fieldnames=list(summary[0].keys()))
-        writer.writeheader()
-        writer.writerows(summary)
-
-    d_axis = [row["d"] for row in summary]
-
-    plt.figure(figsize=(8, 5))
-    plt.errorbar(
-        d_axis,
-        [row["duration_mean"] for row in summary],
-        yerr=[row["duration_std"] for row in summary],
-        marker="o",
-        capsize=4,
-    )
-    plt.title("Task 2: Epidemic Duration vs Death Rate")
-    plt.xlabel("Death rate d")
-    plt.ylabel("Epidemic duration (steps)")
-    plt.grid(True, linestyle="--", alpha=0.6)
-    plt.savefig("plots/task2_duration_vs_d.png")
-    plt.close()
-
-    plt.figure(figsize=(8, 5))
-    plt.errorbar(
-        d_axis,
-        [row["deaths_mean"] for row in summary],
-        yerr=[row["deaths_std"] for row in summary],
-        marker="o",
-        capsize=4,
-        color="#e74c3c",
-    )
-    plt.title("Task 2: Total Deaths vs Death Rate")
-    plt.xlabel("Death rate d")
-    plt.ylabel("Total deaths")
-    plt.grid(True, linestyle="--", alpha=0.6)
-    plt.savefig("plots/task2_deaths_vs_d.png")
-    plt.close()
-
-    return raw_path, summary_path
 
 
 def create_task2_state():
@@ -374,25 +187,9 @@ def update_batch_fast(task2):
     task2["last_output"] = f"Saved {raw_path} and {summary_path}"
 
 
-def draw_text(screen, font, text, x, y, color=(230, 234, 240)):
-    screen.blit(font.render(text, True, color), (x, y))
-
-
 def add_adjust_buttons(buttons, panel_x, y, on_minus, on_plus, enabled):
     buttons.append(Button((panel_x + 284, y - 4, 34, 26), "-", on_minus, enabled))
     buttons.append(Button((panel_x + 324, y - 4, 34, 26), "+", on_plus, enabled))
-
-
-def draw_grid(screen, sim, cell_size):
-    for x in range(sim.width):
-        for y in range(sim.height):
-            agent = sim.grid[x, y]
-            rect = pygame.Rect(x * cell_size, y * cell_size, cell_size, cell_size)
-
-            if agent is not None:
-                pygame.draw.rect(screen, COLORS[agent.state], rect)
-            else:
-                pygame.draw.rect(screen, COLORS["GRID_LINE"], rect, 1)
 
 
 def draw_task2_panel(screen, fonts, task2, panel_x, panel_height):
@@ -414,11 +211,36 @@ def draw_task2_panel(screen, fonts, task2, panel_x, panel_height):
     y += 32
 
     rows = [
-        ("d start", f"{task2['d_start']:.1f}", lambda: adjust_value(task2, "d_start", -0.1), lambda: adjust_value(task2, "d_start", 0.1)),
-        ("d end", f"{task2['d_end']:.1f}", lambda: adjust_value(task2, "d_end", -0.1), lambda: adjust_value(task2, "d_end", 0.1)),
-        ("d step", f"{task2['d_step']:.1f}", lambda: adjust_value(task2, "d_step", -0.1), lambda: adjust_value(task2, "d_step", 0.1)),
-        ("selected d", f"{task2['selected_d']:.1f}", lambda: cycle_selected_d(task2, -1), lambda: cycle_selected_d(task2, 1)),
-        ("seed", str(seed), lambda: cycle_seed(task2, -1), lambda: cycle_seed(task2, 1)),
+        (
+            "d start",
+            f"{task2['d_start']:.1f}",
+            lambda: adjust_value(task2, "d_start", -0.1),
+            lambda: adjust_value(task2, "d_start", 0.1),
+        ),
+        (
+            "d end",
+            f"{task2['d_end']:.1f}",
+            lambda: adjust_value(task2, "d_end", -0.1),
+            lambda: adjust_value(task2, "d_end", 0.1),
+        ),
+        (
+            "d step",
+            f"{task2['d_step']:.1f}",
+            lambda: adjust_value(task2, "d_step", -0.1),
+            lambda: adjust_value(task2, "d_step", 0.1),
+        ),
+        (
+            "selected d",
+            f"{task2['selected_d']:.1f}",
+            lambda: cycle_selected_d(task2, -1),
+            lambda: cycle_selected_d(task2, 1),
+        ),
+        (
+            "seed",
+            str(seed),
+            lambda: cycle_seed(task2, -1),
+            lambda: cycle_seed(task2, 1),
+        ),
     ]
 
     for label, value, minus_action, plus_action in rows:
@@ -426,14 +248,34 @@ def draw_task2_panel(screen, fonts, task2, panel_x, panel_height):
         add_adjust_buttons(buttons, panel_x, y, minus_action, plus_action, enabled)
         y += 32
 
-    buttons.append(Button((panel_x + 18, y, 90, 30), f"Mode: {task2['mode']}", lambda: toggle_mode(task2), enabled))
+    buttons.append(
+        Button(
+            (panel_x + 18, y, 90, 30),
+            f"Mode: {task2['mode']}",
+            lambda: toggle_mode(task2),
+            enabled,
+        )
+    )
     buttons.append(Button((panel_x + 116, y, 96, 30), "Run", lambda: run_selected(task2), enabled))
-    buttons.append(Button((panel_x + 220, y, 80, 30), "Stop", lambda: stop_selected(task2), task2["selected_running"]))
-    buttons.append(Button((panel_x + 308, y, 84, 30), "Reset", lambda: reset_selected_simulation(task2), not task2["batch_running"]))
+    buttons.append(
+        Button((panel_x + 220, y, 80, 30), "Stop", lambda: stop_selected(task2), task2["selected_running"])
+    )
+    buttons.append(
+        Button(
+            (panel_x + 308, y, 84, 30),
+            "Reset",
+            lambda: reset_selected_simulation(task2),
+            not task2["batch_running"],
+        )
+    )
     y += 40
 
-    buttons.append(Button((panel_x + 18, y, 176, 30), "Generate Seeds", lambda: set_generated_seeds(task2), enabled))
-    buttons.append(Button((panel_x + 204, y, 176, 30), "Run All Fast", lambda: start_batch_fast(task2), enabled))
+    buttons.append(
+        Button((panel_x + 18, y, 176, 30), "Generate Seeds", lambda: set_generated_seeds(task2), enabled)
+    )
+    buttons.append(
+        Button((panel_x + 204, y, 176, 30), "Run All Fast", lambda: start_batch_fast(task2), enabled)
+    )
     y += 42
 
     draw_text(screen, small_font, f"Seeds: {', '.join(str(value) for value in task2['seeds'])}", panel_x + 18, y)
@@ -442,7 +284,13 @@ def draw_task2_panel(screen, fonts, task2, panel_x, panel_height):
     y += 24
     draw_text(screen, font, f"Step: {task2['step']} / {TASK2_BASELINE['max_steps']}", panel_x + 18, y)
     y += 24
-    draw_text(screen, font, f"H/I/S/R/D: {counts['H']} / {counts['I']} / {counts['S']} / {counts['R']} / {counts['Dead']}", panel_x + 18, y)
+    draw_text(
+        screen,
+        font,
+        f"H/I/S/R/D: {counts['H']} / {counts['I']} / {counts['S']} / {counts['R']} / {counts['Dead']}",
+        panel_x + 18,
+        y,
+    )
     y += 24
     draw_text(screen, font, f"Active I+S: {active_cases}", panel_x + 18, y)
     y += 24
@@ -455,9 +303,21 @@ def draw_task2_panel(screen, fonts, task2, panel_x, panel_height):
         metrics = task2["selected_metrics"]
         draw_text(screen, title_font, "Selected Result", panel_x + 18, y)
         y += 28
-        draw_text(screen, small_font, f"duration={metrics['epidemic_duration']} deaths={metrics['total_deaths']}", panel_x + 18, y)
+        draw_text(
+            screen,
+            small_font,
+            f"duration={metrics['epidemic_duration']} deaths={metrics['total_deaths']}",
+            panel_x + 18,
+            y,
+        )
         y += 22
-        draw_text(screen, small_font, f"recovered={metrics['final_recovered']} peak sick={metrics['peak_sick']}", panel_x + 18, y)
+        draw_text(
+            screen,
+            small_font,
+            f"recovered={metrics['final_recovered']} peak sick={metrics['peak_sick']}",
+            panel_x + 18,
+            y,
+        )
         y += 30
 
     draw_text(screen, title_font, "Batch Summary", panel_x + 18, y)

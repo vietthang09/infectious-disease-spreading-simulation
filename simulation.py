@@ -119,17 +119,22 @@ class Simulation:
 
     def record_history(self):
         # History is used both by the animation and by Task 2 metrics.
-        h_count = sum(1 for item in self.agents_list if item['agent'].state == 'H')
-        i_count = sum(1 for item in self.agents_list if item['agent'].state == 'I')
-        s_count = sum(1 for item in self.agents_list if item['agent'].state == 'S')
-        r_count = sum(1 for item in self.agents_list if item['agent'].state == 'R')
-        dead_count = self.config["initial_population"] - len(self.agents_list)
+        counts = self.count_states()
 
-        self.history['H'].append(h_count)
-        self.history['I'].append(i_count)
-        self.history['S'].append(s_count)
-        self.history['R'].append(r_count)
-        self.history['Dead'].append(dead_count)
+        self.history['H'].append(counts["H"])
+        self.history['I'].append(counts["I"])
+        self.history['S'].append(counts["S"])
+        self.history['R'].append(counts["R"])
+        self.history['Dead'].append(counts["Dead"])
+
+    def count_states(self):
+        return {
+            "H": sum(1 for item in self.agents_list if item['agent'].state == 'H'),
+            "I": sum(1 for item in self.agents_list if item['agent'].state == 'I'),
+            "S": sum(1 for item in self.agents_list if item['agent'].state == 'S'),
+            "R": sum(1 for item in self.agents_list if item['agent'].state == 'R'),
+            "Dead": self.config["initial_population"] - len(self.agents_list),
+        }
 
     def active_cases(self):
         if not self.history["I"]:
