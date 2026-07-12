@@ -9,6 +9,7 @@ class Simulation:
         self.height = config['grid_height']
 
         self.grid = np.empty((self.width, self.height), dtype=object)
+        self.grid.fill(None)
         self.agents_list = []
         self.history = {"H": [], "I": [], "S": [], "R": [], "Dead": []}
         self.setup_population()
@@ -41,6 +42,8 @@ class Simulation:
         return neighbors
     
     def update_step(self):
+        # Movement phase: each living agent tries to move to an empty
+        # neighbouring cell, or stays in its current cell.
         random.shuffle(self.agents_list)
 
         for item in self.agents_list:
@@ -59,6 +62,8 @@ class Simulation:
                     self.grid[x, y] = None
                     item["pos"] = (nx, ny)
 
+        # Infection phase: healthy agents adjacent to at least one Sick agent
+        # become Infected with probability p.
         new_infections = []
         for item in self.agents_list:
             x, y = item["pos"]
@@ -76,6 +81,8 @@ class Simulation:
             agent.state = "I"
             agent.timer = 0
 
+        # State transition phase: Infected agents incubate for N steps, then
+        # Sick agents remain infectious for N steps before recovery or death.
         dead_agents = []
         for item in self.agents_list:
             agent = item["agent"]
@@ -89,17 +96,23 @@ class Simulation:
             elif agent.state == "S":
                 agent.timer += 1
                 if agent.timer >= self.config["N"]:
-                    if random.random() < self.config["s"]:
-                        agent.state = "R"
-                    else:
+                    if random.random() < self.config["d"]:
                         dead_agents.append(item)
+                    else:
+                        agent.state = "R"
         
+        # Death removal phase: dead agents leave the grid and no longer move,
+        # infect, or occupy a cell.
         for item in dead_agents:
             x, y = item["pos"]
             self.grid[x, y] = None
             if item in self.agents_list:
                 self.agents_list.remove(item)
 
+        self.record_history()
+
+    def record_history(self):
+        # History is used both by the animation and by Task 2 metrics.
         h_count = sum(1 for item in self.agents_list if item['agent'].state == 'H')
         i_count = sum(1 for item in self.agents_list if item['agent'].state == 'I')
         s_count = sum(1 for item in self.agents_list if item['agent'].state == 'S')
@@ -111,3 +124,8 @@ class Simulation:
         self.history['S'].append(s_count)
         self.history['R'].append(r_count)
         self.history['Dead'].append(dead_count)
+
+    def active_cases(self):
+        if not self.history["I"]:
+            return sum(1 for item in self.agents_list if item["agent"].state in ("I", "S"))
+        return self.history["I"][-1] + self.history["S"][-1]

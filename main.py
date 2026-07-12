@@ -1,92 +1,541 @@
-import pygame
+import csv
+import os
+import random
 import sys
-from config import CONFIG, COLORS
-from simulation import Simulation
+from copy import deepcopy
+from statistics import mean, stdev
+
+os.environ.setdefault("MPLCONFIGDIR", "/tmp/matplotlib")
+
 import matplotlib.pyplot as plt
-import os 
+import numpy as np
+import pygame
 
-def clear_old_plots():
-    if not os.path.exists("plots_history"):
-        os.makedirs("plots_history")
-    else:
-        for filename in os.listdir("plots_history"):
-            file_path = os.path.join("plots_history", filename)
-            if os.path.isfile(file_path):
-                os.remove(file_path)
+from config import COLORS, CONFIG
+from simulation import Simulation
 
-def export_plot(history, step):
+
+PANEL_WIDTH = 420
+TASK2_MASTER_SEED = 20260712
+TASK2_DEFAULT_SEEDS = [101, 203, 307, 409, 503]
+TASK2_BASELINE = {
+    "p": 0.3,
+    "N": 5,
+    "max_steps": 300,
+}
+SLOW_FPS = 1
+FAST_FPS = 10
+
+
+class Button:
+    def __init__(self, rect, label, action, enabled=True):
+        self.rect = pygame.Rect(rect)
+        self.label = label
+        self.action = action
+        self.enabled = enabled
+
+    def draw(self, screen, font):
+        fill = (64, 72, 84) if self.enabled else (42, 46, 54)
+        border = (120, 130, 145) if self.enabled else (72, 78, 88)
+        text_color = (235, 238, 242) if self.enabled else (135, 140, 148)
+        pygame.draw.rect(screen, fill, self.rect, border_radius=4)
+        pygame.draw.rect(screen, border, self.rect, width=1, border_radius=4)
+        label = font.render(self.label, True, text_color)
+        screen.blit(label, label.get_rect(center=self.rect.center))
+
+    def handle_click(self, pos):
+        if self.enabled and self.rect.collidepoint(pos):
+            self.action()
+            return True
+        return False
+
+
+def generate_fixed_seeds():
+    rng = random.Random(TASK2_MASTER_SEED)
+    return rng.sample(range(1, 10000), 5)
+
+
+def d_values(start, end, step):
+    values = []
+    value = start
+    while value <= end + 1e-9:
+        values.append(round(value, 1))
+        value += step
+    return values
+
+
+def build_task2_config(d_value):
+    config = deepcopy(CONFIG)
+    config["p"] = TASK2_BASELINE["p"]
+    config["N"] = TASK2_BASELINE["N"]
+    config["d"] = round(d_value, 1)
+    config["s"] = round(1.0 - d_value, 1)
+    return config
+
+
+def create_seeded_simulation(d_value, seed):
+    random.seed(seed)
+    np.random.seed(seed)
+    return Simulation(build_task2_config(d_value))
+
+
+def current_counts(sim):
+    if sim.history["H"]:
+        return {
+            "H": sim.history["H"][-1],
+            "I": sim.history["I"][-1],
+            "S": sim.history["S"][-1],
+            "R": sim.history["R"][-1],
+            "Dead": sim.history["Dead"][-1],
+        }
+
+    return {
+        "H": sum(1 for item in sim.agents_list if item["agent"].state == "H"),
+        "I": sum(1 for item in sim.agents_list if item["agent"].state == "I"),
+        "S": sum(1 for item in sim.agents_list if item["agent"].state == "S"),
+        "R": sum(1 for item in sim.agents_list if item["agent"].state == "R"),
+        "Dead": CONFIG["initial_population"] - len(sim.agents_list),
+    }
+
+
+def compute_metrics(sim, d_value, seed, duration):
+    infected_plus_sick = [
+        infected + sick for infected, sick in zip(sim.history["I"], sim.history["S"])
+    ]
+    counts = current_counts(sim)
+
+    return {
+        "d": round(d_value, 1),
+        "s": round(1.0 - d_value, 1),
+        "seed": seed,
+        "epidemic_duration": duration,
+        "total_deaths": counts["Dead"],
+        "final_recovered": counts["R"],
+        "peak_sick": max(sim.history["S"]) if sim.history["S"] else counts["S"],
+        "peak_infected_plus_sick": (
+            max(infected_plus_sick) if infected_plus_sick else counts["I"] + counts["S"]
+        ),
+    }
+
+
+def run_setting_fast(d_value, seed):
+    sim = create_seeded_simulation(d_value, seed)
+    duration = TASK2_BASELINE["max_steps"]
+
+    for step in range(1, TASK2_BASELINE["max_steps"] + 1):
+        sim.update_step()
+        if sim.active_cases() == 0:
+            duration = step
+            break
+
+    return compute_metrics(sim, d_value, seed, duration)
+
+
+def summarize_task2(raw_results):
+    summary = []
+    grouped = {}
+    for row in raw_results:
+        grouped.setdefault(row["d"], []).append(row)
+
+    for d_value in sorted(grouped):
+        rows = grouped[d_value]
+        durations = [row["epidemic_duration"] for row in rows]
+        deaths = [row["total_deaths"] for row in rows]
+        peak_sick = [row["peak_sick"] for row in rows]
+        summary.append(
+            {
+                "d": d_value,
+                "s": round(1.0 - d_value, 1),
+                "duration_mean": mean(durations),
+                "duration_std": stdev(durations) if len(durations) > 1 else 0.0,
+                "deaths_mean": mean(deaths),
+                "deaths_std": stdev(deaths) if len(deaths) > 1 else 0.0,
+                "peak_sick_mean": mean(peak_sick),
+                "peak_sick_std": stdev(peak_sick) if len(peak_sick) > 1 else 0.0,
+            }
+        )
+    return summary
+
+
+def export_task2_outputs(raw_results, summary):
+    os.makedirs("results", exist_ok=True)
+    os.makedirs("plots", exist_ok=True)
+
+    raw_path = "results/task2_raw_runs.csv"
+    summary_path = "results/task2_summary.csv"
+
+    with open(raw_path, "w", newline="", encoding="utf-8") as file:
+        writer = csv.DictWriter(file, fieldnames=list(raw_results[0].keys()))
+        writer.writeheader()
+        writer.writerows(raw_results)
+
+    with open(summary_path, "w", newline="", encoding="utf-8") as file:
+        writer = csv.DictWriter(file, fieldnames=list(summary[0].keys()))
+        writer.writeheader()
+        writer.writerows(summary)
+
+    d_axis = [row["d"] for row in summary]
+
     plt.figure(figsize=(8, 5))
-
-    plt.plot(history['H'], label='Healthy', color='#2ecc71')
-    plt.plot(history['I'], label='Infected', color='#f1c40f')
-    plt.plot(history['S'], label='Sick', color='#e74c3c')
-    plt.plot(history['R'], label='Recovered', color='#95a5a6')
-    plt.plot(history['Dead'], label='Dead', color='black')
-
-    plt.title(f'Epidemic Simulation - Step {step}')
-    plt.xlabel('Time Steps')
-    plt.ylabel('Number of Agents')
-    plt.legend(loc='upper right')
-    plt.grid(True, linestyle='--', alpha=0.6)
-
-    filename = f"plots_history/epidemic_curve_step_{step:04d}.png"
-
-    plt.savefig(filename)
+    plt.errorbar(
+        d_axis,
+        [row["duration_mean"] for row in summary],
+        yerr=[row["duration_std"] for row in summary],
+        marker="o",
+        capsize=4,
+    )
+    plt.title("Task 2: Epidemic Duration vs Death Rate")
+    plt.xlabel("Death rate d")
+    plt.ylabel("Epidemic duration (steps)")
+    plt.grid(True, linestyle="--", alpha=0.6)
+    plt.savefig("plots/task2_duration_vs_d.png")
     plt.close()
 
+    plt.figure(figsize=(8, 5))
+    plt.errorbar(
+        d_axis,
+        [row["deaths_mean"] for row in summary],
+        yerr=[row["deaths_std"] for row in summary],
+        marker="o",
+        capsize=4,
+        color="#e74c3c",
+    )
+    plt.title("Task 2: Total Deaths vs Death Rate")
+    plt.xlabel("Death rate d")
+    plt.ylabel("Total deaths")
+    plt.grid(True, linestyle="--", alpha=0.6)
+    plt.savefig("plots/task2_deaths_vs_d.png")
+    plt.close()
+
+    return raw_path, summary_path
+
+
+def create_task2_state():
+    state = {
+        "d_start": 0.1,
+        "d_end": 0.9,
+        "d_step": 0.1,
+        "selected_d": 0.1,
+        "seeds": TASK2_DEFAULT_SEEDS[:],
+        "seed_index": 0,
+        "mode": "Slow",
+        "sim": None,
+        "step": 0,
+        "selected_running": False,
+        "selected_done": False,
+        "selected_metrics": None,
+        "batch_running": False,
+        "batch_jobs": [],
+        "batch_total": 0,
+        "batch_completed": 0,
+        "raw_results": [],
+        "summary": [],
+        "status": "Idle",
+        "last_output": "Select a Task 2 setting and run it",
+    }
+    reset_selected_simulation(state)
+    return state
+
+
+def clamp_task2_ranges(task2):
+    task2["d_start"] = round(max(0.0, min(0.9, task2["d_start"])), 1)
+    task2["d_end"] = round(max(task2["d_start"], min(0.9, task2["d_end"])), 1)
+    task2["d_step"] = round(max(0.1, min(0.9, task2["d_step"])), 1)
+
+    values = d_values(task2["d_start"], task2["d_end"], task2["d_step"])
+    if task2["selected_d"] not in values:
+        task2["selected_d"] = values[0]
+
+
+def reset_selected_simulation(task2):
+    seed = task2["seeds"][task2["seed_index"]]
+    task2["sim"] = create_seeded_simulation(task2["selected_d"], seed)
+    task2["step"] = 0
+    task2["selected_running"] = False
+    task2["selected_done"] = False
+    task2["selected_metrics"] = None
+    task2["status"] = "Selected setting reset"
+    task2["last_output"] = f"Ready: d={task2['selected_d']:.1f}, seed={seed}"
+
+
+def adjust_value(task2, key, delta):
+    if task2["batch_running"] or task2["selected_running"]:
+        return
+    task2[key] = round(task2[key] + delta, 1)
+    clamp_task2_ranges(task2)
+    reset_selected_simulation(task2)
+
+
+def cycle_selected_d(task2, direction):
+    if task2["batch_running"] or task2["selected_running"]:
+        return
+    values = d_values(task2["d_start"], task2["d_end"], task2["d_step"])
+    index = values.index(task2["selected_d"])
+    task2["selected_d"] = values[(index + direction) % len(values)]
+    reset_selected_simulation(task2)
+
+
+def cycle_seed(task2, direction):
+    if task2["batch_running"] or task2["selected_running"]:
+        return
+    task2["seed_index"] = (task2["seed_index"] + direction) % len(task2["seeds"])
+    reset_selected_simulation(task2)
+
+
+def toggle_mode(task2):
+    if task2["batch_running"] or task2["selected_running"]:
+        return
+    task2["mode"] = "Fast" if task2["mode"] == "Slow" else "Slow"
+    task2["status"] = f"Mode: {task2['mode']}"
+
+
+def set_generated_seeds(task2):
+    if task2["batch_running"] or task2["selected_running"]:
+        return
+    task2["seeds"] = generate_fixed_seeds()
+    task2["seed_index"] = 0
+    reset_selected_simulation(task2)
+    task2["last_output"] = "Generated fixed seeds from master seed"
+
+
+def run_selected(task2):
+    if task2["batch_running"] or task2["selected_running"]:
+        return
+
+    if task2["selected_done"]:
+        reset_selected_simulation(task2)
+    task2["selected_running"] = True
+    task2["status"] = f"{task2['mode']} run playing"
+    task2["last_output"] = f"{task2['mode']} mode is animating the selected setting"
+
+
+def stop_selected(task2):
+    if not task2["selected_running"]:
+        return
+    task2["selected_running"] = False
+    task2["status"] = "Selected run stopped"
+    task2["last_output"] = "Animation stopped; reset or run selected again"
+
+
+def step_selected_simulation(task2):
+    if not task2["selected_running"]:
+        return
+
+    task2["sim"].update_step()
+    task2["step"] += 1
+
+    if task2["sim"].active_cases() == 0 or task2["step"] >= TASK2_BASELINE["max_steps"]:
+        task2["selected_running"] = False
+        task2["selected_done"] = True
+        task2["selected_metrics"] = compute_metrics(
+            task2["sim"],
+            task2["selected_d"],
+            task2["seeds"][task2["seed_index"]],
+            task2["step"],
+        )
+        task2["status"] = f"Selected {task2['mode'].lower()} run done"
+        task2["last_output"] = (
+            f"{task2['mode']} result: duration={task2['step']}, "
+            f"deaths={task2['selected_metrics']['total_deaths']}"
+        )
+
+
+def start_batch_fast(task2):
+    if task2["batch_running"] or task2["selected_running"]:
+        return
+
+    clamp_task2_ranges(task2)
+    values = d_values(task2["d_start"], task2["d_end"], task2["d_step"])
+    task2["batch_jobs"] = [(d_value, seed) for d_value in values for seed in task2["seeds"]]
+    task2["batch_total"] = len(task2["batch_jobs"])
+    task2["batch_completed"] = 0
+    task2["raw_results"] = []
+    task2["summary"] = []
+    task2["batch_running"] = True
+    task2["status"] = "Running all settings fast"
+    task2["last_output"] = "Batch fast run started"
+
+
+def update_batch_fast(task2):
+    if not task2["batch_running"]:
+        return
+
+    if task2["batch_jobs"]:
+        d_value, seed = task2["batch_jobs"].pop(0)
+        task2["raw_results"].append(run_setting_fast(d_value, seed))
+        task2["batch_completed"] += 1
+        task2["last_output"] = f"Batch: d={d_value:.1f}, seed={seed}"
+        return
+
+    task2["summary"] = summarize_task2(task2["raw_results"])
+    raw_path, summary_path = export_task2_outputs(task2["raw_results"], task2["summary"])
+    task2["batch_running"] = False
+    task2["status"] = "Batch fast run done"
+    task2["last_output"] = f"Saved {raw_path} and {summary_path}"
+
+
+def draw_text(screen, font, text, x, y, color=(230, 234, 240)):
+    screen.blit(font.render(text, True, color), (x, y))
+
+
+def add_adjust_buttons(buttons, panel_x, y, on_minus, on_plus, enabled):
+    buttons.append(Button((panel_x + 284, y - 4, 34, 26), "-", on_minus, enabled))
+    buttons.append(Button((panel_x + 324, y - 4, 34, 26), "+", on_plus, enabled))
+
+
+def draw_grid(screen, sim, cell_size):
+    for x in range(sim.width):
+        for y in range(sim.height):
+            agent = sim.grid[x, y]
+            rect = pygame.Rect(x * cell_size, y * cell_size, cell_size, cell_size)
+
+            if agent is not None:
+                pygame.draw.rect(screen, COLORS[agent.state], rect)
+            else:
+                pygame.draw.rect(screen, COLORS["GRID_LINE"], rect, 1)
+
+
+def draw_task2_panel(screen, fonts, task2, panel_x, panel_height):
+    font, small_font, title_font = fonts
+    buttons = []
+
+    pygame.draw.rect(screen, (25, 29, 36), (panel_x, 0, PANEL_WIDTH, panel_height))
+    pygame.draw.line(screen, (70, 76, 86), (panel_x, 0), (panel_x, panel_height), 2)
+
+    enabled = not task2["batch_running"] and not task2["selected_running"]
+    seed = task2["seeds"][task2["seed_index"]]
+    counts = current_counts(task2["sim"])
+    active_cases = counts["I"] + counts["S"]
+
+    y = 18
+    draw_text(screen, title_font, "Task 2 Only", panel_x + 18, y)
+    y += 30
+    draw_text(screen, small_font, "Baseline: p=0.3, N=5, max_steps=300", panel_x + 18, y)
+    y += 32
+
+    rows = [
+        ("d start", f"{task2['d_start']:.1f}", lambda: adjust_value(task2, "d_start", -0.1), lambda: adjust_value(task2, "d_start", 0.1)),
+        ("d end", f"{task2['d_end']:.1f}", lambda: adjust_value(task2, "d_end", -0.1), lambda: adjust_value(task2, "d_end", 0.1)),
+        ("d step", f"{task2['d_step']:.1f}", lambda: adjust_value(task2, "d_step", -0.1), lambda: adjust_value(task2, "d_step", 0.1)),
+        ("selected d", f"{task2['selected_d']:.1f}", lambda: cycle_selected_d(task2, -1), lambda: cycle_selected_d(task2, 1)),
+        ("seed", str(seed), lambda: cycle_seed(task2, -1), lambda: cycle_seed(task2, 1)),
+    ]
+
+    for label, value, minus_action, plus_action in rows:
+        draw_text(screen, font, f"{label}: {value}", panel_x + 18, y)
+        add_adjust_buttons(buttons, panel_x, y, minus_action, plus_action, enabled)
+        y += 32
+
+    buttons.append(Button((panel_x + 18, y, 90, 30), f"Mode: {task2['mode']}", lambda: toggle_mode(task2), enabled))
+    buttons.append(Button((panel_x + 116, y, 96, 30), "Run", lambda: run_selected(task2), enabled))
+    buttons.append(Button((panel_x + 220, y, 80, 30), "Stop", lambda: stop_selected(task2), task2["selected_running"]))
+    buttons.append(Button((panel_x + 308, y, 84, 30), "Reset", lambda: reset_selected_simulation(task2), not task2["batch_running"]))
+    y += 40
+
+    buttons.append(Button((panel_x + 18, y, 176, 30), "Generate Seeds", lambda: set_generated_seeds(task2), enabled))
+    buttons.append(Button((panel_x + 204, y, 176, 30), "Run All Fast", lambda: start_batch_fast(task2), enabled))
+    y += 42
+
+    draw_text(screen, small_font, f"Seeds: {', '.join(str(value) for value in task2['seeds'])}", panel_x + 18, y)
+    y += 24
+    draw_text(screen, font, f"Status: {task2['status']}", panel_x + 18, y)
+    y += 24
+    draw_text(screen, font, f"Step: {task2['step']} / {TASK2_BASELINE['max_steps']}", panel_x + 18, y)
+    y += 24
+    draw_text(screen, font, f"H/I/S/R/D: {counts['H']} / {counts['I']} / {counts['S']} / {counts['R']} / {counts['Dead']}", panel_x + 18, y)
+    y += 24
+    draw_text(screen, font, f"Active I+S: {active_cases}", panel_x + 18, y)
+    y += 24
+    draw_text(screen, font, f"Batch: {task2['batch_completed']} / {task2['batch_total']}", panel_x + 18, y)
+    y += 30
+    draw_text(screen, small_font, task2["last_output"], panel_x + 18, y, (190, 198, 210))
+    y += 36
+
+    if task2["selected_metrics"]:
+        metrics = task2["selected_metrics"]
+        draw_text(screen, title_font, "Selected Result", panel_x + 18, y)
+        y += 28
+        draw_text(screen, small_font, f"duration={metrics['epidemic_duration']} deaths={metrics['total_deaths']}", panel_x + 18, y)
+        y += 22
+        draw_text(screen, small_font, f"recovered={metrics['final_recovered']} peak sick={metrics['peak_sick']}", panel_x + 18, y)
+        y += 30
+
+    draw_text(screen, title_font, "Batch Summary", panel_x + 18, y)
+    y += 28
+    draw_text(screen, small_font, "d     duration      deaths", panel_x + 18, y, (180, 188, 200))
+    y += 20
+
+    for row in task2["summary"][-9:]:
+        text = (
+            f"{row['d']:.1f}   "
+            f"{row['duration_mean']:.1f} +/- {row['duration_std']:.1f}   "
+            f"{row['deaths_mean']:.1f} +/- {row['deaths_std']:.1f}"
+        )
+        draw_text(screen, small_font, text, panel_x + 18, y)
+        y += 20
+
+    for button in buttons:
+        button.draw(screen, small_font)
+
+    return buttons
+
+
 def main():
-
-    clear_old_plots()
-
     pygame.init()
+    pygame.font.init()
 
     cell_size = CONFIG["cell_size"]
-    screen_width = CONFIG["grid_width"] * cell_size
+    grid_pixel_width = CONFIG["grid_width"] * cell_size
+    screen_width = grid_pixel_width + PANEL_WIDTH
     screen_height = CONFIG["grid_height"] * cell_size
 
     screen = pygame.display.set_mode((screen_width, screen_height))
-    pygame.display.set_caption("Epidemic Simulation")
+    pygame.display.set_caption("Task 2 Epidemic Experiment")
     clock = pygame.time.Clock()
+    fonts = (
+        pygame.font.SysFont("arial", 16),
+        pygame.font.SysFont("arial", 14),
+        pygame.font.SysFont("arial", 20, bold=True),
+    )
 
-    sim = Simulation(CONFIG)
-
+    task2 = create_task2_state()
+    buttons = []
     running = True
-    step_count = 0
 
     while running:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
-                pygame.quit()
-                sys.exit()
-        
-        sim.update_step()
-        step_count += 1
+            elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                for button in buttons:
+                    if button.handle_click(event.pos):
+                        break
+
+        update_batch_fast(task2)
+        step_selected_simulation(task2)
 
         screen.fill(COLORS["BACKGROUND"])
+        draw_grid(screen, task2["sim"], cell_size)
+        buttons = draw_task2_panel(screen, fonts, task2, grid_pixel_width, screen_height)
 
-        for x in range(sim.width):
-            for y in range(sim.height):
-                agent = sim.grid[x, y]
-                rect = pygame.Rect(x * cell_size, y * cell_size, cell_size, cell_size)
-
-                if agent is not None:
-                    pygame.draw.rect(screen, COLORS[agent.state], rect)
-                else:
-                    pygame.draw.rect(screen, COLORS["GRID_LINE"], rect, 1)
-
-        h_count = sim.history['H'][-1]
-        i_count = sim.history['I'][-1]
-        s_count = sim.history['S'][-1]
-        r_count = sim.history['R'][-1]
-        dead_count = sim.history['Dead'][-1]
-
-        pygame.display.set_caption(f"Step: {step_count} | H: {h_count} | I: {i_count} | S: {s_count} | R: {r_count} | Dead: {dead_count}")
+        counts = current_counts(task2["sim"])
+        pygame.display.set_caption(
+            f"Task 2 | d={task2['selected_d']:.1f} | seed={task2['seeds'][task2['seed_index']]} | "
+            f"Step: {task2['step']} | H: {counts['H']} | I: {counts['I']} | "
+            f"S: {counts['S']} | R: {counts['R']} | Dead: {counts['Dead']}"
+        )
         pygame.display.flip()
 
-        export_plot(sim.history, step_count)
+        if task2["selected_running"] and task2["mode"] == "Slow":
+            clock.tick(SLOW_FPS)
+        elif task2["selected_running"] and task2["mode"] == "Fast":
+            clock.tick(FAST_FPS)
+        else:
+            clock.tick(30)
 
-        clock.tick(CONFIG["fps"])
+    pygame.quit()
+    sys.exit()
+
 
 if __name__ == "__main__":
     main()

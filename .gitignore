@@ -2,3 +2,8 @@ __pycache__/
 *.py[cod]
 plots_history/
 venv/
+myenv/
+.codex/
+.agents/
+plots/
+results/

@@ -2,7 +2,7 @@ CONFIG = {
     "grid_width": 60,
     "grid_height": 40,
     "cell_size": 15,
-    "initial_population": 400,
+    "initial_population": 800,
     "fps": 1,
     
     "p": 0.9, 
