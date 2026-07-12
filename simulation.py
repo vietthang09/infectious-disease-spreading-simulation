@@ -62,8 +62,9 @@ class Simulation:
                     self.grid[x, y] = None
                     item["pos"] = (nx, ny)
 
-        # Infection phase: healthy agents adjacent to at least one Sick agent
-        # become Infected with probability p.
+        # Infection phase: p is a per-contact risk. If a Healthy agent has k
+        # Sick neighbours, the chance of at least one successful transmission is
+        # 1 - (1 - p) ** k.
         new_infections = []
         for item in self.agents_list:
             x, y = item["pos"]
@@ -71,10 +72,15 @@ class Simulation:
 
             if agent.state == "H":
                 neighbors = self.get_neighbors(x, y)
-                has_sick_neighbor = any(self.grid[nx, ny] is not None and self.grid[nx, ny].state == "S" for nx, ny in neighbors)
+                sick_neighbors = sum(
+                    1
+                    for nx, ny in neighbors
+                    if self.grid[nx, ny] is not None and self.grid[nx, ny].state == "S"
+                )
 
-                if has_sick_neighbor:
-                    if random.random() < self.config["p"]:
+                if sick_neighbors > 0:
+                    infection_probability = 1 - (1 - self.config["p"]) ** sick_neighbors
+                    if random.random() < infection_probability:
                         new_infections.append(agent)
         
         for agent in new_infections:
