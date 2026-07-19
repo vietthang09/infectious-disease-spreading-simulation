@@ -25,10 +25,10 @@ FAST_FPS = 10
 
 def create_task2_state():
     state = {
-        "d_start": 0.1,
+        "d_start": 0.0,
         "d_end": 0.9,
         "d_step": 0.1,
-        "selected_d": 0.1,
+        "selected_d": 0.0,
         "seeds": TASK2_DEFAULT_SEEDS[:],
         "seed_index": 0,
         "mode": "Slow",
@@ -207,7 +207,13 @@ def draw_task2_panel(screen, fonts, task2, panel_x, panel_height):
     y = 18
     draw_text(screen, title_font, "Task 2 Only", panel_x + 18, y)
     y += 30
-    draw_text(screen, small_font, "Baseline: p=0.3, N=5, max_steps=300", panel_x + 18, y)
+    draw_text(
+        screen,
+        small_font,
+        "Baseline: p=0.3, incubation=5, sick=5, max=1000",
+        panel_x + 18,
+        y,
+    )
     y += 32
 
     rows = [
@@ -347,7 +353,7 @@ def main():
     cell_size = CONFIG["cell_size"]
     grid_pixel_width = CONFIG["grid_width"] * cell_size
     screen_width = grid_pixel_width + PANEL_WIDTH
-    screen_height = CONFIG["grid_height"] * cell_size
+    screen_height = max(CONFIG["grid_height"] * cell_size, 780)
 
     screen = pygame.display.set_mode((screen_width, screen_height))
     pygame.display.set_caption("Task 2 Epidemic Experiment")

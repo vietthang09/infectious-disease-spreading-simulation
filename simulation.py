@@ -5,6 +5,7 @@ from agent import Agent
 class Simulation:
     def __init__(self, config):
         self.config = config
+        self._validate_config()
         self.width = config['grid_width']
         self.height = config['grid_height']
 
@@ -13,6 +14,22 @@ class Simulation:
         self.agents_list = []
         self.history = {"H": [], "I": [], "S": [], "R": [], "Dead": []}
         self.setup_population()
+        self.initial_population = len(self.agents_list)
+        self.record_history()
+
+    def _validate_config(self):
+        required = ("grid_width", "grid_height", "initial_population", "p", "N", "d", "s")
+        missing = [key for key in required if key not in self.config]
+        if missing:
+            raise ValueError(f"Missing simulation config values: {', '.join(missing)}")
+        if not 0.0 <= self.config["p"] <= 1.0:
+            raise ValueError("p must be between 0 and 1")
+        if not 0.0 <= self.config["d"] <= 1.0 or not 0.0 <= self.config["s"] <= 1.0:
+            raise ValueError("d and s must be between 0 and 1")
+        if abs(self.config["d"] + self.config["s"] - 1.0) > 1e-9:
+            raise ValueError("d and s must satisfy d + s = 1")
+        if self.config["N"] < 1 or self.config.get("sick_duration", self.config["N"]) < 1:
+            raise ValueError("N and sick_duration must be positive")
 
     def setup_population(self):
         all_cells = [(x, y) for x in range(self.width) for y in range(self.height)]
@@ -83,7 +100,8 @@ class Simulation:
                     if random.random() < infection_probability:
                         new_infections.append(agent)
         
-        for agent in new_infections:
+        newly_infected = set(new_infections)
+        for agent in newly_infected:
             agent.state = "I"
             agent.timer = 0
 
@@ -94,6 +112,10 @@ class Simulation:
             agent = item["agent"]
 
             if agent.state == "I":
+                # Infection starts at timer 0. Agents infected during this step
+                # begin incubation on the next step, avoiding an off-by-one day.
+                if agent in newly_infected:
+                    continue
                 agent.timer += 1
                 if agent.timer >= self.config["N"]:
                     agent.state = "S"
@@ -101,7 +123,7 @@ class Simulation:
 
             elif agent.state == "S":
                 agent.timer += 1
-                if agent.timer >= self.config["N"]:
+                if agent.timer >= self.config.get("sick_duration", self.config["N"]):
                     if random.random() < self.config["d"]:
                         dead_agents.append(item)
                     else:
@@ -133,7 +155,7 @@ class Simulation:
             "I": sum(1 for item in self.agents_list if item['agent'].state == 'I'),
             "S": sum(1 for item in self.agents_list if item['agent'].state == 'S'),
             "R": sum(1 for item in self.agents_list if item['agent'].state == 'R'),
-            "Dead": self.config["initial_population"] - len(self.agents_list),
+            "Dead": self.initial_population - len(self.agents_list),
         }
 
     def active_cases(self):

@@ -7,6 +7,7 @@ CONFIG = {
     
     "p": 0.9, 
     "N": 5,  
+    "sick_duration": 5,
     "d": 0.2,  
     "s": 0.8,
 }

@@ -1,4 +1,5 @@
 import csv
+import argparse
 import os
 import random
 from copy import deepcopy
@@ -18,7 +19,8 @@ TASK2_DEFAULT_SEEDS = [101, 203, 307, 409, 503]
 TASK2_BASELINE = {
     "p": 0.3,
     "N": 5,
-    "max_steps": 300,
+    "sick_duration": 5,
+    "max_steps": 1000,
 }
 
 
@@ -28,6 +30,10 @@ def generate_fixed_seeds():
 
 
 def d_values(start, end, step):
+    if step <= 0:
+        raise ValueError("d step must be positive")
+    if not 0.0 <= start <= end <= 1.0:
+        raise ValueError("d range must satisfy 0 <= start <= end <= 1")
     values = []
     value = start
     while value <= end + 1e-9:
@@ -40,6 +46,7 @@ def build_task2_config(d_value):
     config = deepcopy(CONFIG)
     config["p"] = TASK2_BASELINE["p"]
     config["N"] = TASK2_BASELINE["N"]
+    config["sick_duration"] = TASK2_BASELINE["sick_duration"]
     config["d"] = round(d_value, 1)
     config["s"] = round(1.0 - d_value, 1)
     return config
@@ -64,17 +71,20 @@ def current_counts(sim):
     return sim.count_states()
 
 
-def compute_metrics(sim, d_value, seed, duration):
+def compute_metrics(sim, d_value, seed, duration, ended_naturally=None):
     infected_plus_sick = [
         infected + sick for infected, sick in zip(sim.history["I"], sim.history["S"])
     ]
     counts = current_counts(sim)
+    if ended_naturally is None:
+        ended_naturally = sim.active_cases() == 0
 
     return {
         "d": round(d_value, 1),
         "s": round(1.0 - d_value, 1),
         "seed": seed,
         "epidemic_duration": duration,
+        "ended_naturally": ended_naturally,
         "total_deaths": counts["Dead"],
         "final_recovered": counts["R"],
         "peak_sick": max(sim.history["S"]) if sim.history["S"] else counts["S"],
@@ -94,7 +104,7 @@ def run_setting_fast(d_value, seed):
             duration = step
             break
 
-    return compute_metrics(sim, d_value, seed, duration)
+    return compute_metrics(sim, d_value, seed, duration, sim.active_cases() == 0)
 
 
 def summarize_task2(raw_results):
@@ -108,6 +118,7 @@ def summarize_task2(raw_results):
         durations = [row["epidemic_duration"] for row in rows]
         deaths = [row["total_deaths"] for row in rows]
         peak_sick = [row["peak_sick"] for row in rows]
+        completed = [row["ended_naturally"] for row in rows]
         summary.append(
             {
                 "d": d_value,
@@ -118,17 +129,21 @@ def summarize_task2(raw_results):
                 "deaths_std": stdev(deaths) if len(deaths) > 1 else 0.0,
                 "peak_sick_mean": mean(peak_sick),
                 "peak_sick_std": stdev(peak_sick) if len(peak_sick) > 1 else 0.0,
+                "completed_runs": sum(completed),
+                "censored_runs": len(completed) - sum(completed),
             }
         )
     return summary
 
 
-def export_task2_outputs(raw_results, summary):
-    os.makedirs("results", exist_ok=True)
-    os.makedirs("plots", exist_ok=True)
+def export_task2_outputs(raw_results, summary, results_dir="results", plots_dir="plots"):
+    if not raw_results or not summary:
+        raise ValueError("Task 2 output requires at least one completed run")
+    os.makedirs(results_dir, exist_ok=True)
+    os.makedirs(plots_dir, exist_ok=True)
 
-    raw_path = "results/task2_raw_runs.csv"
-    summary_path = "results/task2_summary.csv"
+    raw_path = os.path.join(results_dir, "task2_raw_runs.csv")
+    summary_path = os.path.join(results_dir, "task2_summary.csv")
 
     with open(raw_path, "w", newline="", encoding="utf-8") as file:
         writer = csv.DictWriter(file, fieldnames=list(raw_results[0].keys()))
@@ -154,7 +169,9 @@ def export_task2_outputs(raw_results, summary):
     plt.xlabel("Death rate d")
     plt.ylabel("Epidemic duration (steps)")
     plt.grid(True, linestyle="--", alpha=0.6)
-    plt.savefig("plots/task2_duration_vs_d.png")
+    duration_plot_path = os.path.join(plots_dir, "task2_duration_vs_d.png")
+    plt.tight_layout()
+    plt.savefig(duration_plot_path, dpi=160)
     plt.close()
 
     plt.figure(figsize=(8, 5))
@@ -170,7 +187,44 @@ def export_task2_outputs(raw_results, summary):
     plt.xlabel("Death rate d")
     plt.ylabel("Total deaths")
     plt.grid(True, linestyle="--", alpha=0.6)
-    plt.savefig("plots/task2_deaths_vs_d.png")
+    deaths_plot_path = os.path.join(plots_dir, "task2_deaths_vs_d.png")
+    plt.tight_layout()
+    plt.savefig(deaths_plot_path, dpi=160)
     plt.close()
 
     return raw_path, summary_path
+
+
+def run_task2_experiment(values=None, seeds=None, progress=False):
+    values = values if values is not None else d_values(0.0, 0.9, 0.1)
+    seeds = seeds if seeds is not None else TASK2_DEFAULT_SEEDS
+    raw_results = []
+    total = len(values) * len(seeds)
+    for d_value in values:
+        for seed in seeds:
+            raw_results.append(run_setting_fast(d_value, seed))
+            if progress:
+                print(f"Completed {len(raw_results)}/{total}: d={d_value:.1f}, seed={seed}")
+    return raw_results, summarize_task2(raw_results)
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Run the reproducible Task 2 experiment")
+    parser.add_argument("--d-start", type=float, default=0.0)
+    parser.add_argument("--d-end", type=float, default=0.9)
+    parser.add_argument("--d-step", type=float, default=0.1)
+    parser.add_argument("--results-dir", default="results")
+    parser.add_argument("--plots-dir", default="plots")
+    args = parser.parse_args()
+
+    values = d_values(args.d_start, args.d_end, args.d_step)
+    raw_results, summary = run_task2_experiment(values=values, progress=True)
+    raw_path, summary_path = export_task2_outputs(
+        raw_results, summary, args.results_dir, args.plots_dir
+    )
+    print(f"Saved raw results to {raw_path}")
+    print(f"Saved summary to {summary_path}")
+
+
+if __name__ == "__main__":
+    main()
