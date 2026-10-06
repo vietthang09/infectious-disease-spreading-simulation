@@ -192,7 +192,57 @@ def export_task2_outputs(raw_results, summary, results_dir="results", plots_dir=
     plt.savefig(deaths_plot_path, dpi=160)
     plt.close()
 
+    export_epidemic_curves_plot(plots_dir)
+
     return raw_path, summary_path
+
+
+def export_epidemic_curves_plot(plots_dir="plots", d_samples=(0.1, 0.5, 0.9), seed=101):
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+    colors = {0.1: "#2ecc71", 0.5: "#f39c12", 0.9: "#e74c3c"}
+
+    for d_val in d_samples:
+        sim = create_seeded_simulation(d_val, seed)
+        for _ in range(TASK2_BASELINE["max_steps"]):
+            sim.update_step()
+            if sim.active_cases() == 0:
+                break
+        active = [i + s for i, s in zip(sim.history["I"], sim.history["S"])]
+        axes[0].plot(
+            active,
+            label=f"d={d_val} (s={round(1 - d_val, 1)})",
+            color=colors.get(d_val, "blue"),
+            linewidth=2,
+        )
+
+    axes[0].set_title("Active Cases (I + S) over Time (Seed 101)")
+    axes[0].set_xlabel("Time step")
+    axes[0].set_ylabel("Number of Active Cases")
+    axes[0].grid(True, linestyle="--", alpha=0.6)
+    axes[0].legend()
+
+    sim_mid = create_seeded_simulation(0.5, seed)
+    for _ in range(TASK2_BASELINE["max_steps"]):
+        sim_mid.update_step()
+        if sim_mid.active_cases() == 0:
+            break
+
+    axes[1].plot(sim_mid.history["H"], label="Healthy (H)", color="#27ae60", linewidth=1.8)
+    axes[1].plot(sim_mid.history["I"], label="Infected (I)", color="#f1c40f", linewidth=1.8)
+    axes[1].plot(sim_mid.history["S"], label="Sick (S)", color="#e74c3c", linewidth=1.8)
+    axes[1].plot(sim_mid.history["R"], label="Recovered (R)", color="#3498db", linewidth=1.8)
+    axes[1].plot(sim_mid.history["Dead"], label="Dead", color="#7f8c8d", linewidth=1.8, linestyle="--")
+    axes[1].set_title("Macroscopic State Dynamics (d=0.5, s=0.5, Seed 101)")
+    axes[1].set_xlabel("Time step")
+    axes[1].set_ylabel("Number of Agents")
+    axes[1].grid(True, linestyle="--", alpha=0.6)
+    axes[1].legend()
+
+    plt.tight_layout()
+    curve_path = os.path.join(plots_dir, "task2_epidemic_curves.png")
+    plt.savefig(curve_path, dpi=160)
+    plt.close()
+    return curve_path
 
 
 def run_task2_experiment(values=None, seeds=None, progress=False):

@@ -5,6 +5,4 @@ venv/
 myenv/
 .codex/
 .agents/
-report/
-plots/
-result/
+plots_history/
