@@ -34,6 +34,12 @@ python -m pip install -r requirements.txt
 ## Run the complete Task 2 experiment
 
 ```bash
+python main.py
+```
+
+or equivalently:
+
+```bash
 python task2_experiment.py
 ```
 
@@ -47,17 +53,17 @@ This creates:
 Custom ranges can also be used, for example:
 
 ```bash
-python task2_experiment.py --d-start 0.0 --d-end 0.5 --d-step 0.1
+python main.py --d-start 0.0 --d-end 0.5 --d-step 0.1
 ```
 
-## Interactive animation
+## Interactive animation (GUI)
 
 ```bash
-python main.py
+python -m ui
 ```
 
-The interface can animate one selected `(d, seed)` run in slow or fast mode,
-or execute the complete batch. Batch results are saved to the same output
+The Pygame interface can animate one selected `(d, seed)` run in slow or fast
+mode, or execute the complete batch. Batch results are saved to the same output
 directories.
 
 ## Tests
