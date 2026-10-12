@@ -58,13 +58,26 @@ python main.py --d-start 0.0 --d-end 0.5 --d-step 0.1
 
 ## Interactive animation (GUI)
 
+### 1. Base Model Simulation GUI
+Interactive cellular automaton simulation with full parameter tuning ($p, N, d, s, Pop$), Play/Pause/Step controls, real-time epidemic curves, and plot/CSV export:
+```bash
+python run_base_simulation_gui.py
+```
+
+### 2. Task 2 Experiment GUI (Batch d parameter sweep)
 ```bash
 python -m ui
 ```
 
-The Pygame interface can animate one selected `(d, seed)` run in slow or fast
-mode, or execute the complete batch. Batch results are saved to the same output
-directories.
+### 3. Specialized In-depth GUIs
+- **Task 2 Spatial Extinction Mechanisms**:
+  ```bash
+  python run_task2_dynamics_gui.py
+  ```
+- **Patient Zero (F0) Extinction under Sparse Density / Lockdown**:
+  ```bash
+  python run_f0_extinction_gui.py
+  ```
 
 ## Tests
 
