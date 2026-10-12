@@ -1,40 +1,3 @@
-"""
-Interactive Pygame GUI for the Base Epidemic Spreading Simulation.
-
-Features:
-1. Base Cellular Automaton Model on a 2D grid with periodic boundaries:
-   - 4 states: Healthy (H), Infected (I - incubation), Sick (S - infectious),
-     Recovered (R - immune) / Dead.
-   - Initial condition: 1 patient zero in Infected (I) state, all others Healthy (H).
-   - Moore neighborhood movement (8 directions + stay).
-
-2. Interactive Simulation Controls:
-   - Play / Pause (Spacebar or UI button)
-   - Single Step +1 (Right arrow key or UI button)
-   - Reset with current seed (R key or UI button)
-   - New Seed (randomize seed and reset)
-   - Speed selection: 1 FPS, 5 FPS, 15 FPS, 30 FPS, and MAX (unthrottled)
-
-3. Comprehensive Parameter Tuning:
-   - p: Transmission risk per contact (0.01 - 1.0)
-   - N: Incubation period in days/steps (I -> S)
-   - sick_duration: Infectious period in days/steps (S -> R/Dead)
-   - d: Mortality probability, automatically keeping s = 1 - d
-   - Pop: Initial population size
-
-4. Scenario Presets:
-   - Baseline (p=0.3, N=5, sick=5, d=0.2, s=0.8, Pop=800)
-   - Extremely Dangerous (Subtask 1: p=0.6, N=7, sick=8, d=0.5, Pop=800)
-   - Mild / Fast Recovery (p=0.2, N=3, sick=3, d=0.02, Pop=800)
-   - High Mortality Outbreak (p=0.35, N=4, sick=5, d=0.85, Pop=800)
-
-5. Real-Time Analytics & Epidemic Curves:
-   - Color-coded 2D cellular grid animation.
-   - Live multi-curve timeline chart (H, I, S, R, Dead).
-   - Real-time statistics: Step, Active cases (I+S), Peak Sick (S max), Cumulative infections.
-   - High-resolution Matplotlib plot and CSV export to plots/ and results/.
-"""
-
 import csv
 import os
 import random
@@ -364,7 +327,7 @@ class BaseSimulationGUI:
         buttons = []
 
         # Play / Pause
-        play_label = "⏸ Pause" if self.running else "Play"
+        play_label = "Pause" if self.running else "Play"
         play_color = (192, 57, 43) if self.running else (39, 174, 96)
         play_rect = pygame.Rect(x, y, 115, btn_h)
         pygame.draw.rect(self.screen, play_color, play_rect, border_radius=4)
@@ -531,7 +494,7 @@ class BaseSimulationGUI:
         # 7. Export Button & Status Toast
         exp_rect = pygame.Rect(x, y, 175, 28)
         pygame.draw.rect(self.screen, (39, 174, 96), exp_rect, border_radius=4)
-        lbl_exp = self.f_bold.render("📊 Export Plot & CSV", True, (255, 255, 255))
+        lbl_exp = self.f_bold.render("Export Plot & CSV", True, (255, 255, 255))
         self.screen.blit(lbl_exp, lbl_exp.get_rect(center=exp_rect.center))
         buttons.append(("export", exp_rect))
 
